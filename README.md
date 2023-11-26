@@ -1,4 +1,4 @@
-# Guía para instalar librerías y dependencias del código de Registro de Asistencia
+# Guía para correr el código de Registro de Asistencia
 
 Primero, hay que instalar lo siguiente:
 * Para Mac:
