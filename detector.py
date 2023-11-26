@@ -1,69 +1,64 @@
+# Import necessary libraries
 import cv2
 import face_recognition
 from pathlib import Path
 import pickle
 from collections import Counter
-import datetime
 import requests
 import shutil
-import uuid
 import datetime
 import pytz
 import tkinter as tk
 
-# Pasos para instalar el programa:
-
-# Para Mac:
-# brew update
-# brew install cmake gcc
-
-# Para Windows:
-# choco install mingw
-
-# Crear un Virtual Environment
-# Correr el siguiente comando para instalar los paquetes y dependencias:
-# python -m pip install -r requirements.txt
-
+# Path to store facial encodings
 DEFAULT_ENCODINGS_PATH = Path("output/encodings.pkl")
-logged_today = set()  # Global set to keep track of names logged today
 
-# Función para tomar una foto
+# Set to keep track of names logged for today
+logged_today = set()
+
+# Function to capture a face image using the default camera
 def capture_face_image(output_dir: Path):
-    cap = cv2.VideoCapture(0)  # Open the default camera
+    cap = cv2.VideoCapture(0)  # Initialize camera
     try:
         while cap.isOpened():
-            ret, frame = cap.read()
+            ret, frame = cap.read() # Read a frame from the camera
             if not ret:
                 print("Failed to grab frame.")
                 break
 
-            cv2.imshow('Frame', frame)
+            cv2.imshow('Frame', frame) # Display the frame
 
-            if cv2.waitKey(1) & 0xFF == ord('c'):  # Capture image when 'c' is pressed
+            # Capture image when 'c' is pressed
+            if cv2.waitKey(1) & 0xFF == ord('c'):
+                # Save the captured image to the output directory
                 file_path = output_dir / f"{len(list(output_dir.glob('*.jpg'))):04d}.jpg"
                 cv2.imwrite(str(file_path), frame)
                 print(f"Image saved to {file_path}")
                 break
     finally:
+        # Release the camera and close all OpenCV windows
         cap.release()
         cv2.destroyAllWindows()
 
+# Function to get a person's name from input
 def get_person_name():
     name = input("Enter the name of the person: ")
     return name
 
+# Function to organize the captured image into a directory
 def organize_captured_image(name, captured_image_path):
+    # Create a directory for the person if it doesn't exist
     target_dir = Path(f"training/{name}")
     target_dir.mkdir(parents=True, exist_ok=True)
+    # Move the captured image to the person's directory
     target_file_path = target_dir / captured_image_path.name
     shutil.move(captured_image_path, target_file_path)
 
-def generate_random_id():
-    random_uuid = str(uuid.uuid4()).replace("-", "")
-    return random_uuid
-
+# Function to save a new student's information to a database
 def save_new_student_db(name):
-    url = 'https://class-insight.vercel.app/api/students/newstudent'  # Replace with the URL you're sending the request to
+    # API endpoint to post new student data
+    url = 'https://class-insight.vercel.app/api/students/newstudent'
+    # Data payload containing the student's information
     payload = {
         "name": name,
         "courses": [],
@@ -76,6 +71,7 @@ def save_new_student_db(name):
     response = requests.post(url, json=payload, headers=headers)
     print(response.content)
 
+    # Check response status and print appropriate message
     if response.status_code == 200:
         print('POST New student request successful:', response.text)
         data = response.json()
@@ -83,19 +79,23 @@ def save_new_student_db(name):
     else:
         print('Failed to send POST New student request:', response.text)
 
+# Function to register a new face in the system
 def register_new_face():
     output_dir = Path("temp")
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Capture a face image
     capture_face_image(output_dir)
+    # Get the person's name and save their data
     name = get_person_name()
     id_student = save_new_student_db(name)
     captured_image_path = list(output_dir.glob('*.jpg'))[0]
+    # Organize the captured image and encode known faces
     organize_captured_image(id_student, captured_image_path)
     encode_known_faces()
     shutil.rmtree(output_dir)  # Remove temporary directory
     quit()
 
-# Encode known faces.
+# Function to encode known faces from training images
 def encode_known_faces(
     model: str = "hog", encodings_location: Path = DEFAULT_ENCODINGS_PATH
 ) -> None:
@@ -105,6 +105,7 @@ def encode_known_faces(
     """
     names = []
     encodings = []
+    # Load each image and extract face encodings
     for filepath in Path("training").glob("*/*"):
         name = filepath.parent.name
         image = face_recognition.load_image_file(filepath)
@@ -116,14 +117,17 @@ def encode_known_faces(
             names.append(name)
             encodings.append(encoding)
 
+    # Save the encodings
     name_encodings = {"names": names, "encodings": encodings}
     with encodings_location.open(mode="wb") as f:
         pickle.dump(name_encodings, f)
 
+# Check if a name has been logged today
 def has_been_logged_today(name):
     today = datetime.datetime.now(monterrey_timezone).strftime('%Y-%m-%d')
     return (name, today) in logged_today
 
+# Function to get student information from the server
 def get_students_info():
     url = 'https://class-insight.vercel.app/api/students/getstudentsinfo'
 
@@ -136,6 +140,7 @@ def get_students_info():
     else:
         print('GET Students info request failed:', response.text)
 
+# Function to send a PUT request to update attendance
 def send_put_request(id_identified, courseId):
 
     url = 'https://class-insight.vercel.app/api/students/attendance/' + id_identified
@@ -153,6 +158,7 @@ def send_put_request(id_identified, courseId):
     else:
         print('Failed to send PUT request:', response.text)
 
+# Log a recognition event
 def log_recognition(name):
     today = datetime.datetime.now(monterrey_timezone).strftime('%Y-%m-%d')
     if not has_been_logged_today(name):
@@ -160,6 +166,7 @@ def log_recognition(name):
             attendance_file.write(f'{today}, {name}\n')
         logged_today.add((name, today))  # Add the name and date to the set
 
+# Internal function to recognize a face from encodings
 def _recognize_face(unknown_encoding, loaded_encodings):
     boolean_matches = face_recognition.compare_faces(
         loaded_encodings["encodings"], unknown_encoding
@@ -172,6 +179,7 @@ def _recognize_face(unknown_encoding, loaded_encodings):
     if votes:
         return votes.most_common(1)[0][0]
 
+# Function to recognize faces in real-time using the camera
 def recognize_faces_live(
     model: str = "hog",
     encodings_location: Path = DEFAULT_ENCODINGS_PATH,
@@ -179,9 +187,7 @@ def recognize_faces_live(
     with encodings_location.open(mode="rb") as f:
         loaded_encodings = pickle.load(f)
 
-    students = get_students_info()
-    print(students)
-    cap = cv2.VideoCapture(0)  # Open the default camera
+    cap = cv2.VideoCapture(0)  # Initialize camera
     recognized_names = set()  # Set to keep track of recognized names
     try:
         while cap.isOpened():
@@ -206,11 +212,9 @@ def recognize_faces_live(
                 if not id_identified:
                     id_identified = "Unknown"
 
-                # Draw bounding box
+                # Draw bounding box and label on the frame
                 top, right, bottom, left = bounding_box
                 cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)  # Red bounding box
-
-                # Draw label
                 cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
                 font = cv2.FONT_HERSHEY_DUPLEX
                 cv2.putText(frame, id_identified, (left + 6, bottom - 6), font, 1.0, (255, 255, 255), 1)
@@ -223,7 +227,8 @@ def recognize_faces_live(
         cap.release()
         cv2.destroyAllWindows()
 
-# Specify the timezone for Monterrey
+
+# Setup timezone for Monterrey
 monterrey_timezone = pytz.timezone('America/Monterrey')
 
 # Create the main window
